@@ -7,7 +7,9 @@
   Groups class names or packages into services with Group-ClassNames.ps1 (same folder; it owns the input format
   and the grouping: ca.gc.cra.awsc.web.Foo -> service "awsc.web"), validates each payload against the Dynatrace
   validator, and creates it. Dry run by default: nothing is created without -Create.
-  Services that already exist (same name) are skipped, so the script can be re-run.
+  Services that already exist (same name) are updated in place with -Create, so the script can be re-run.
+  Each service matches every public method of its classes (any return type and arguments); narrow it with
+  -ReturnType / -ArgumentTypes if needed.
 
 .EXAMPLE
   $env:DT_URL = 'https://abc12345.live.dynatrace.com'; $env:DT_API_TOKEN = '...'   # token: ReadConfig + WriteConfig
@@ -26,6 +28,8 @@ param(
     [string]$EnvUrl = $env:DT_URL,
     [string]$Token = $env:DT_API_TOKEN,
     [string]$MethodName = '*',
+    [string]$ReturnType,        # omitted = any return type
+    [string[]]$ArgumentTypes,   # omitted = any arguments; pass @() for no-argument methods only
     [switch]$Create
 )
 
@@ -53,7 +57,13 @@ end {
     }
 
     # 2. Existing services, so re-runs skip them
-    $existing = @((Invoke-RestMethod -Headers $headers -Uri $base).values | ForEach-Object { $_.name })
+    $existing = @{}
+    foreach ($v in @((Invoke-RestMethod -Headers $headers -Uri $base).values)) { $existing[$v.name] = $v.id }
+
+    # Method rule: every public method of the matched classes, any return type and arguments unless narrowed
+    $methodRule = [ordered]@{ methodName = $MethodName; visibility = 'PUBLIC' }
+    if ($PSBoundParameters.ContainsKey('ReturnType')) { $methodRule.returnType = $ReturnType }
+    if ($PSBoundParameters.ContainsKey('ArgumentTypes')) { $methodRule.argumentTypes = @($ArgumentTypes) }
 
     # 3. Build, validate, create
     $report = foreach ($name in $services.Keys) {
@@ -66,7 +76,7 @@ end {
                     enabled           = $true
                     className         = $services[$name].Prefix
                     classNameMatcher  = 'STARTS_WITH'
-                    methodRules       = @([ordered]@{ methodName = $MethodName; returnType = 'void'; argumentTypes = @(); visibility = 'PUBLIC' })
+                    methodRules       = @($methodRule)
                 })
         } | ConvertTo-Json -Depth 8
 
@@ -74,7 +84,14 @@ end {
         try { Invoke-RestMethod -Method Post -Headers $headers -ContentType 'application/json' -Body $payload -Uri "$base/validator" | Out-Null }
         catch { $status = "INVALID: $($_.ErrorDetails.Message)" }
 
-        if ($existing -contains $name) { $status = 'exists, skipped' }
+        if ($existing.ContainsKey($name)) {
+            # Re-running with -Create brings an existing service in line with the current rule
+            if ($status -eq 'ok' -and $Create) {
+                try { Invoke-RestMethod -Method Put -Headers $headers -ContentType 'application/json' -Body $payload -Uri "$base/$($existing[$name])" | Out-Null; $status = "updated $($existing[$name])" }
+                catch { $status = "FAILED: $($_.ErrorDetails.Message)" }
+            }
+            elseif ($status -eq 'ok') { $status = 'exists, valid (dry run: would update)' }
+        }
         elseif ($status -eq 'ok' -and $Create) {
             try { $r = Invoke-RestMethod -Method Post -Headers $headers -ContentType 'application/json' -Body $payload -Uri $base; $status = "created $($r.id)" }
             catch { $status = "FAILED: $($_.ErrorDetails.Message)" }
