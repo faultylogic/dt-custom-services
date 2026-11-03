@@ -34,7 +34,8 @@ param(
     [string]$MethodName = '*',
     [string]$ReturnType = '*',  # the API requires a value; '*' = any return type
     [string[]]$ArgumentTypes,   # omitted = any arguments; pass @() for no-argument methods only
-    [string[]]$ProcessGroups,   # process group IDs (PROCESS_GROUP-...) the services apply to; omitted = all    [switch]$Create
+    [string[]]$ProcessGroups,   # process group IDs (PROCESS_GROUP-...) the services apply to; omitted = all
+    [switch]$Create
 )
 
 begin { $lines = New-Object System.Collections.Generic.List[string] }
