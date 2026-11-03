@@ -28,7 +28,7 @@ param(
     [string]$EnvUrl = $env:DT_URL,
     [string]$Token = $env:DT_API_TOKEN,
     [string]$MethodName = '*',
-    [string]$ReturnType,        # omitted = any return type
+    [string]$ReturnType = '*',  # the API requires a value; '*' = any return type
     [string[]]$ArgumentTypes,   # omitted = any arguments; pass @() for no-argument methods only
     [switch]$Create
 )
@@ -61,8 +61,7 @@ end {
     foreach ($v in @((Invoke-RestMethod -Headers $headers -Uri $base).values)) { $existing[$v.name] = $v.id }
 
     # Method rule: every public method of the matched classes, any return type and arguments unless narrowed
-    $methodRule = [ordered]@{ methodName = $MethodName; visibility = 'PUBLIC' }
-    if ($PSBoundParameters.ContainsKey('ReturnType')) { $methodRule.returnType = $ReturnType }
+    $methodRule = [ordered]@{ methodName = $MethodName; returnType = $ReturnType; visibility = 'PUBLIC' }
     if ($PSBoundParameters.ContainsKey('ArgumentTypes')) { $methodRule.argumentTypes = @($ArgumentTypes) }
 
     # 3. Build, validate, create
