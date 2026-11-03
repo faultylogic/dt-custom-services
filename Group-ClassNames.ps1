@@ -14,6 +14,12 @@
   containing '_' or digits (generated stubs), is a class name; anything else is a package. Package-only lines
   count toward the group but add no class name, so no rule can be built from them.
 
+  A class line may carry one method after '#': Class#[visibility ]name(argType,argType):returnType, for example
+  ca.gc.ccra.rccr.web.filter.CacheControlSetter#doFilter(javax.servlet.ServletRequest,javax.servlet.ServletResponse,javax.servlet.FilterChain):void
+  Visibility defaults to public and the return type to '*'. Repeat the class on several lines for several methods
+  (identical methods are merged). Emitted as Methods: class name -> method objects. A class with no method lines
+  gets no method list (Create-CustomServices.ps1 then falls back to its wildcard method rule).
+
 .EXAMPLE
   .\Group-ClassNames.ps1 -ClassFile classes.txt
 
@@ -40,6 +46,9 @@ end {
     foreach ($raw in $lines) {
         $l = $raw.Trim()
         if (-not $l -or $l.StartsWith('#')) { continue }
+        $methodText = $null   # optional "#[visibility ]method(argType,...):returnType" after the class
+        $hash = $l.IndexOf('#')
+        if ($hash -ge 0) { $methodText = $l.Substring($hash + 1).Trim(); $l = $l.Substring(0, $hash).Trim() }
         $l = ($l -replace '\.class$', '' -replace '[/\\]', '.').Trim('.')
         $match = $null   # longest root the line sits under
         foreach ($r in $roots) { if (($l -eq $r -or $l.StartsWith("$r.")) -and (-not $match -or $r.Length -gt $match.Length)) { $match = $r } }
@@ -55,9 +64,22 @@ end {
         if ($rest.Count -lt $Levels) { Write-Warning "Skipped (fewer than $Levels package levels under $match): $raw"; continue }
         $name = ($rest[0..($Levels - 1)] -join '.')
         $key = "$match|$name"
-        if (-not $services.Contains($key)) { $services[$key] = [pscustomobject]@{ Root = $match; Name = $name; Classes = 0; ClassNames = (New-Object System.Collections.Generic.List[string]) } }
+        if (-not $services.Contains($key)) { $services[$key] = [pscustomobject]@{ Root = $match; Name = $name; Classes = 0; ClassNames = (New-Object System.Collections.Generic.List[string]); Methods = [ordered]@{} } }
         $services[$key].Classes++
         if ($fullClass -and -not $services[$key].ClassNames.Contains($fullClass)) { $services[$key].ClassNames.Add($fullClass) }
+        if ($fullClass -and $methodText) {
+            if ($methodText -match '^(?:(?<vis>public|private|protected|package)\s+)?(?<m>[^\s(]+)\s*\((?<args>[^)]*)\)\s*(?::\s*)?(?<ret>\S+)?$') {
+                $vis = if ($Matches.vis) { $Matches.vis.ToUpper() } else { 'PUBLIC' }
+                $argTypes = @($Matches.args.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                $ret = if ($Matches.ret) { $Matches.ret } else { '*' }
+                if (-not $services[$key].Methods.Contains($fullClass)) { $services[$key].Methods[$fullClass] = New-Object System.Collections.Generic.List[object] }
+                $sig = "$vis $($Matches.m)($($argTypes -join ','))$ret"
+                if (-not ($services[$key].Methods[$fullClass] | Where-Object { $_.Signature -eq $sig })) {
+                    $services[$key].Methods[$fullClass].Add([pscustomobject]@{ Signature = $sig; MethodName = $Matches.m; ArgumentTypes = $argTypes; ReturnType = $ret; Visibility = $vis })
+                }
+            }
+            else { Write-Warning "Method not understood (expected #[visibility ]name(argType,...):returnType): $raw" }
+        }
     }
     if ($services.Count -eq 0) { throw "No input line starts with: $($roots -join ', ')." }
 

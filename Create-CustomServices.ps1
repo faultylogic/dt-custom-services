@@ -10,8 +10,10 @@
   Services that already exist (same name) are updated in place with -Create, so the script can be re-run.
   Each service gets one rule per class (EQUALS on the full class name, because this API only allows prefix
   matching together with an annotation), so the input needs full class names; package-only lines add no rule.
-  Each rule matches every public method (any return type and arguments); narrow it with
-  -ReturnType / -ArgumentTypes if needed.
+  A class line can list methods (Class#doFilter(argType,...):void, see Group-ClassNames.ps1) and the rule then
+  matches exactly those. A class with no methods gets one wildcard rule (any public method; narrow it with
+  -ReturnType / -ArgumentTypes), though Dynatrace may not treat '*' as a wildcard.
+  -ProcessGroups limits every service to one or more process groups (IDs); omitted = all process groups.
 
 .EXAMPLE
   $env:DT_URL = 'https://abc12345.live.dynatrace.com'; $env:DT_API_TOKEN = '...'   # token: ReadConfig + WriteConfig
@@ -32,7 +34,7 @@ param(
     [string]$MethodName = '*',
     [string]$ReturnType = '*',  # the API requires a value; '*' = any return type
     [string[]]$ArgumentTypes,   # omitted = any arguments; pass @() for no-argument methods only
-    [switch]$Create
+    [string[]]$ProcessGroups,   # process group IDs (PROCESS_GROUP-...) the services apply to; omitted = all    [switch]$Create
 )
 
 begin { $lines = New-Object System.Collections.Generic.List[string] }
@@ -55,7 +57,7 @@ end {
     $services = [ordered]@{}
     foreach ($g in $groups) {
         $prefix = "$($g.Root).$($g.Name)"
-        $services[$(if ($dupes -contains $g.Name) { $prefix } else { $g.Name })] = [pscustomobject]@{ Prefix = $prefix; Classes = $g.Classes; ClassNames = @($g.ClassNames) }
+        $services[$(if ($dupes -contains $g.Name) { $prefix } else { $g.Name })] = [pscustomobject]@{ Prefix = $prefix; Classes = $g.Classes; ClassNames = @($g.ClassNames); Methods = $g.Methods }
     }
 
     # 2. Existing services, so re-runs skip them
@@ -70,7 +72,12 @@ end {
     $report = foreach ($name in $services.Keys) {
         # One EQUALS rule per class: this Dynatrace API only allows STARTS_WITH together with an annotation
         $rules = @(foreach ($c in $services[$name].ClassNames) {
-                [ordered]@{ enabled = $true; className = $c; matcher = 'EQUALS'; methodRules = @($methodRule) }
+                # Explicit methods from the input (#method(args):return) win; a class without any gets the wildcard rule
+                $listed = $services[$name].Methods[$c]
+                $methodRules = if ($listed -and $listed.Count) {
+                    @($listed | ForEach-Object { [ordered]@{ methodName = $_.MethodName; argumentTypes = @($_.ArgumentTypes); returnType = $_.ReturnType; visibility = $_.Visibility } })
+                } else { @($methodRule) }
+                [ordered]@{ enabled = $true; className = $c; matcher = 'EQUALS'; methodRules = $methodRules }
             })
         if ($rules.Count -eq 0) {
             [pscustomobject]@{ Service = $name; Group = $services[$name].Prefix; Rules = 0; Status = 'SKIPPED: only package names given, full class names needed' }
@@ -81,6 +88,7 @@ end {
             enabled         = $true
             queueEntryPoint = $true
             rules           = $rules
+            processGroups   = @($ProcessGroups)
         } | ConvertTo-Json -Depth 8
 
         $status = 'ok'
