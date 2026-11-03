@@ -74,7 +74,7 @@ end {
             rules           = @([ordered]@{
                     enabled           = $true
                     className         = $services[$name].Prefix
-                    classNameMatcher  = 'STARTS_WITH'
+                    matcher           = 'STARTS_WITH'
                     methodRules       = @($methodRule)
                 })
         } | ConvertTo-Json -Depth 8
