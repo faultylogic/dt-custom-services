@@ -8,7 +8,9 @@
   and the grouping: ca.gc.cra.awsc.web.Foo -> service "awsc.web"), validates each payload against the Dynatrace
   validator, and creates it. Dry run by default: nothing is created without -Create.
   Services that already exist (same name) are updated in place with -Create, so the script can be re-run.
-  Each service matches every public method of its classes (any return type and arguments); narrow it with
+  Each service gets one rule per class (EQUALS on the full class name, because this API only allows prefix
+  matching together with an annotation), so the input needs full class names; package-only lines add no rule.
+  Each rule matches every public method (any return type and arguments); narrow it with
   -ReturnType / -ArgumentTypes if needed.
 
 .EXAMPLE
@@ -53,7 +55,7 @@ end {
     $services = [ordered]@{}
     foreach ($g in $groups) {
         $prefix = "$($g.Root).$($g.Name)"
-        $services[$(if ($dupes -contains $g.Name) { $prefix } else { $g.Name })] = [pscustomobject]@{ Prefix = $prefix; Classes = $g.Classes }
+        $services[$(if ($dupes -contains $g.Name) { $prefix } else { $g.Name })] = [pscustomobject]@{ Prefix = $prefix; Classes = $g.Classes; ClassNames = @($g.ClassNames) }
     }
 
     # 2. Existing services, so re-runs skip them
@@ -66,17 +68,19 @@ end {
 
     # 3. Build, validate, create
     $report = foreach ($name in $services.Keys) {
-        # The API rejects a trailing dot, so the prefix is "<root>.<group>"; "starts with" matches on it
+        # One EQUALS rule per class: this Dynatrace API only allows STARTS_WITH together with an annotation
+        $rules = @(foreach ($c in $services[$name].ClassNames) {
+                [ordered]@{ enabled = $true; className = $c; matcher = 'EQUALS'; methodRules = @($methodRule) }
+            })
+        if ($rules.Count -eq 0) {
+            [pscustomobject]@{ Service = $name; Group = $services[$name].Prefix; Rules = 0; Status = 'SKIPPED: only package names given, full class names needed' }
+            continue
+        }
         $payload = [ordered]@{
             name            = $name
             enabled         = $true
             queueEntryPoint = $true
-            rules           = @([ordered]@{
-                    enabled           = $true
-                    className         = $services[$name].Prefix
-                    matcher           = 'STARTS_WITH'
-                    methodRules       = @($methodRule)
-                })
+            rules           = $rules
         } | ConvertTo-Json -Depth 8
 
         $status = 'ok'
@@ -97,7 +101,7 @@ end {
         }
         elseif ($status -eq 'ok') { $status = 'valid (dry run)' }
 
-        [pscustomobject]@{ Service = $name; ClassPrefix = $services[$name].Prefix; Classes = $services[$name].Classes; Status = $status }
+        [pscustomobject]@{ Service = $name; Group = $services[$name].Prefix; Rules = $rules.Count; Status = $status }
     }
     $report | Format-Table -AutoSize
     # The table truncates long statuses, so print each distinct error in full
