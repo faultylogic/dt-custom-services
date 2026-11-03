@@ -16,9 +16,10 @@
 
   A class line may carry one method after '#': Class#[visibility ]name(argType,argType):returnType, for example
   ca.gc.ccra.rccr.web.filter.CacheControlSetter#doFilter(javax.servlet.ServletRequest,javax.servlet.ServletResponse,javax.servlet.FilterChain):void
-  Visibility defaults to public and the return type to '*'. Repeat the class on several lines for several methods
-  (identical methods are merged). Emitted as Methods: class name -> method objects. A class with no method lines
-  gets no method list (Create-CustomServices.ps1 then falls back to its wildcard method rule).
+  Visibility defaults to public. Give the return type: Dynatrace requires one and documents no wildcard.
+  Repeat the class on several lines for several methods (identical methods are merged). Emitted as Methods:
+  class name -> method objects. A class with no method lines has no method list, and Create-CustomServices.ps1
+  builds no rule for it.
 
 .EXAMPLE
   .\Group-ClassNames.ps1 -ClassFile classes.txt
