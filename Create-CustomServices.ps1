@@ -101,6 +101,8 @@ end {
         [pscustomobject]@{ Service = $name; ClassPrefix = $services[$name].Prefix; Classes = $services[$name].Classes; Status = $status }
     }
     $report | Format-Table -AutoSize
+    # The table truncates long statuses, so print each distinct error in full
+    foreach ($e in @($report | Where-Object { $_.Status -match '^(INVALID|FAILED)' } | ForEach-Object { $_.Status } | Select-Object -Unique)) { Write-Host $e -ForegroundColor Red }
 
     if (-not $Create) { Write-Host 'Dry run: nothing was created. Re-run with -Create to create the services.' }
     if ($EnvUrl -match '/e/[0-9a-f-]+$') {
